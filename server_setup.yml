@@ -1,0 +1,189 @@
+---
+# server_setup.yml
+- name: Provision a new server with Web Server, SMTP, and FTP setup
+  hosts: all
+  become: yes  # This will run tasks with elevated (sudo) privileges
+  vars:
+    web_user: "webadmin"
+    web_group: "webadmins"
+    document_root: "/var/www/html"
+    smtp_user: "smtpuser"
+    smtp_email: "smtpuser@example.com"
+    ftp_user: "ftpuser"
+    ftp_password: "ftpsecurepassword"
+
+  tasks:
+    # Task 1: Install Apache Web Server
+    - name: Install Apache web server (Debian)
+      apt:
+        name: apache2
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"  # Runs only on Debian-based systems (e.g., Ubuntu)
+
+    - name: Install Apache web server (RedHat/CentOS)
+      yum:
+        name: httpd
+        state: present
+      when: ansible_os_family == "RedHat"  # Runs only on RedHat-based systems (e.g., CentOS)
+
+    # Task 2: Install msmtp for SMTP setup
+    - name: Install msmtp package (Debian)
+      apt:
+        name: msmtp
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install msmtp package (RedHat/CentOS)
+      yum:
+        name: msmtp
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # Task 3: Configure msmtp for SMTP (sending emails)
+    - name: Configure msmtp
+      copy:
+        dest: "/etc/msmtprc"
+        content: |
+          account default
+          host smtp.example.com
+          port 587
+          auth on
+          user {{ smtp_user }}
+          password {{ smtp_password }}
+          from {{ smtp_email }}
+          logfile /var/log/msmtp.log
+        mode: '0600'
+        owner: root
+        group: root
+      notify:
+        - restart msmtp
+
+    # Task 4: Create a new user
+    - name: Create a new user for the web server
+      user:
+        name: "{{ web_user }}"
+        group: "{{ web_group }}"
+        state: present
+        shell: /bin/bash
+        create_home: yes
+      tags:
+        - user
+
+    # Task 5: Create a new group for web server users
+    - name: Create a group for the web server users
+      group:
+        name: "{{ web_group }}"
+        state: present
+      tags:
+        - user
+
+    # Task 6: Set up the Document Root Directory
+    - name: Ensure the document root directory exists
+      file:
+        path: "{{ document_root }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ web_user }}"
+        group: "{{ web_group }}"
+      tags:
+        - webserver
+
+    # Task 7: Copy a sample HTML file to the document root
+    - name: Copy a sample index.html file to the server
+      copy:
+        dest: "{{ document_root }}/index.html"
+        content: |
+          <html>
+            <head>
+              <title>Welcome to the Web Server</title>
+            </head>
+            <body>
+              <h1>This is a test web page hosted on the new server.</h1>
+            </body>
+          </html>
+      tags:
+        - webserver
+
+    # Task 8: Start and enable the web server
+    - name: Ensure Apache service is running and enabled
+      service:
+        name: apache2
+        state: started
+        enabled: yes
+      when: ansible_os_family == "Debian"
+      tags:
+        - webserver
+
+    - name: Ensure Apache service is running and enabled (RedHat/CentOS)
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+      tags:
+        - webserver
+
+    # Task 9: Install FTP server (vsftpd)
+    - name: Install vsftpd package (Debian)
+      apt:
+        name: vsftpd
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install vsftpd package (RedHat/CentOS)
+      yum:
+        name: vsftpd
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # Task 10: Configure vsftpd
+    - name: Configure vsftpd settings
+      copy:
+        dest: "/etc/vsftpd.conf"
+        content: |
+          listen=YES
+          anonymous_enable=NO
+          local_enable=YES
+          write_enable=YES
+          local_umask=022
+          dirmessage_enable=YES
+          xferlog_enable=YES
+          connect_from_port_20=YES
+          listen_ipv6=NO
+        mode: '0644'
+        owner: root
+        group: root
+      notify:
+        - restart vsftpd
+
+    # Task 11: Create a user for FTP access
+    - name: Create a new FTP user
+      user:
+        name: "{{ ftp_user }}"
+        password: "{{ ftp_password | password_hash('sha512') }}"
+        state: present
+        shell: /bin/false  # No shell access, just FTP access
+        create_home: yes
+      tags:
+        - ftp
+
+    # Task 12: Ensure vsftpd is running and enabled
+    - name: Ensure vsftpd service is running and enabled
+      service:
+        name: vsftpd
+        state: started
+        enabled: yes
+      tags:
+        - ftp
+
+  handlers:
+    - name: restart msmtp
+      service:
+        name: msmtp
+        state: restarted
+
+    - name: restart vsftpd
+      service:
+        name: vsftpd
+        state: restarted
